@@ -6,6 +6,8 @@
 name: Build OpenWrt system image
 
 on:
+  schedule:
+    - cron: '0 10 * * 5'
   repository_dispatch:
   workflow_dispatch:
     inputs:
@@ -18,10 +20,14 @@ on:
           - openwrt_main
           - immortalwrt_master
           - lede_master
+      openwrt_tag:
+        description: "Select the source tag/branch/commit"
+        required: false
+        default: ""
       openwrt_board:
         description: "Select device board"
         required: false
-        default: "all"
+        default: "s905d"
         type: choice
         options:
           - all
@@ -194,7 +200,7 @@ on:
       openwrt_kernel:
         description: "Select kernel version"
         required: false
-        default: "6.1.y_6.12.y"
+        default: "6.12.y"
         type: choice
         options:
           - 5.10.y
@@ -215,10 +221,11 @@ on:
       kernel_repo:
         description: "Set the kernel repository"
         required: false
-        default: "ophub/kernel"
+        default: "XavierAlpha/kernel"
         type: choice
         options:
           - ophub/kernel
+          - XavierAlpha/kernel
       kernel_usage:
         description: "Set the tags of the stable kernel."
         required: false
@@ -231,7 +238,7 @@ on:
       openwrt_ip:
         description: "Set OpenWrt default IP address."
         required: false
-        default: "192.168.1.1"
+        default: "192.168.1.2"
       use_ccache:
         description: "Auto use ccache."
         required: false
@@ -248,12 +255,12 @@ on:
       builder_name:
         description: "Set OpenWrt builder signature."
         required: false
-        default: "ophub"
+        default: "camellia"
         type: choice
         options:
           - ophub
           - angel
-          - yourname
+          - camellia
 
 env:
   FEEDS_CONF: config/${{ inputs.source_branch }}/feeds.conf.default
@@ -340,9 +347,15 @@ jobs:
           REPO_BRANCH="${source_branch_input##*_}"
 
           # Clone source code
-          git clone -q --single-branch --depth=1 --branch=${REPO_BRANCH} ${REPO_URL} openwrt
+          if [[ -n "${{ inputs.openwrt_tag }}" ]]; then
+              REPO_BRANCH="${{ inputs.openwrt_tag }}"
+              git clone -q --single-branch --depth=1 --branch="${REPO_BRANCH}" "${REPO_URL}" openwrt || \
+              (rm -rf openwrt 2>/dev/null; mkdir -p openwrt && cd openwrt && git init -q && git remote add origin "${REPO_URL}" && git fetch --depth 1 origin "${REPO_BRANCH}" && git checkout -q FETCH_HEAD)
+          else
+              git clone -q --single-branch --depth=1 --branch=${REPO_BRANCH} ${REPO_URL} openwrt
+          fi
           ln -sf /builder/openwrt ${{ github.workspace }}/openwrt
-          ln -sf /builder/openwrt /home/runner/work/_actions/ophub/amlogic-s9xxx-openwrt/main/openwrt
+          ln -sf /builder/openwrt /home/runner/work/_actions/XavierAlpha/amlogic-s9xxx-openwrt/main/openwrt
 
           # Set output information
           echo "build_tag=OpenWrt_${{ inputs.source_branch }}_${{ inputs.openwrt_storage }}_$(date +"%Y.%m")" >> ${GITHUB_ENV}
@@ -385,7 +398,7 @@ jobs:
 
       - name: Get OpenWrt source hash
         id: openwrthash
-        if: ${{ steps.pull.outputs.status }} == 'success' && !cancelled()
+        if: ${{ steps.codes.outputs.status }} == 'success' && !cancelled()
         run: |
           # Get the latest source hash from the kernel repository
           repo_path="$(echo "${{ env.REPO_URL }}" | awk -F"github.com/" '{print $2}')"
@@ -451,7 +464,7 @@ jobs:
 
       - name: Packaging OpenWrt
         if: ${{ steps.clean.outputs.status }} == 'success' && !cancelled()
-        uses: ophub/amlogic-s9xxx-openwrt@main
+        uses: XavierAlpha/amlogic-s9xxx-openwrt@main
         with:
           openwrt_path: openwrt/output/*rootfs.tar.gz
           openwrt_ip: ${{ inputs.openwrt_ip }}
@@ -475,7 +488,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
             ### OpenWrt Image information
-            - Default IP: `192.168.1.1`
+            - Default IP: `192.168.1.2`
             - Default username: `root`
             - Default password: `password`
             - Default WIFI name: `OpenWrt`
